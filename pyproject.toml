@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "consorsextract"
+version = "0.1.0"
+description = "Extract transaction data from Consorsbank PDF statements and convert to CSV for tax preparation"
+authors = ["Marc Schütze <scharc@gmail.com>"]
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/scharc/consorsbank-pdf-extractor"
+keywords = ["pdf", "banking", "consorsbank", "csv", "finance", "tax"]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pypdf2 = "^3.0.1"
+
+[tool.poetry.scripts]
+consorsextract = "extract:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
