@@ -12,6 +12,7 @@ keywords = ["pdf", "banking", "consorsbank", "csv", "finance", "tax"]
 python = "^3.12"
 pypdf2 = "^3.0.1"
 
+
 [tool.poetry.scripts]
 consorsextract = "extract:main"
 
