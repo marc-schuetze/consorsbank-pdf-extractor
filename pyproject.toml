@@ -10,7 +10,8 @@ keywords = ["pdf", "banking", "consorsbank", "csv", "finance", "tax"]
 
 [tool.poetry.dependencies]
 python = "^3.12"
-pypdf2 = "^3.0.1"
+# No Python package dependencies: text extraction uses the system `pdftotext`
+# binary from poppler-utils (apt install poppler-utils / brew install poppler).
 
 
 [tool.poetry.scripts]

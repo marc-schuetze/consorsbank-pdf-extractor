@@ -8,26 +8,35 @@ This tool processes PDF bank statements from [Consorsbank](https://www.consorsba
 
 ## Features
 
-- ✅ Extract transactions from Consorsbank PDF statements
-- ✅ Handle VISA card transactions and regular bank transfers
-- ✅ Clean German formatting (amounts, dates)
-- ✅ Command-line interface with progress reporting
-- ✅ Detailed logging for troubleshooting
+- ✅ Extract transactions from Consorsbank Girokonto PDF statements
+- ✅ Handles **both statement layouts** (pre-2025 spaced and 2025+ compact)
+- ✅ Handles transfers, direct debits, VISA card debits, standing orders, fees
+- ✅ Clean German formatting → signed decimal amounts, ISO-style fields
+- ✅ **Balance reconciliation**: every statement is checked against its own
+  printed opening/closing balance, so missed or misread transactions are flagged
+- ✅ Recursive input scan, single combined CSV, detailed logging
+
+## How it works
+
+Text is extracted with poppler's `pdftotext -layout`, which preserves the
+column layout of the statement. Consorsbank changed its PDF format over the
+years — older statements keep spaces between fields while newer ones run numbers
+together — and `-layout` normalises both into the same aligned text so one
+parser handles every era. There are **no Python package dependencies**.
 
 ## Installation
 
-### Option 1: Using Poetry (recommended)
+### Prerequisite: poppler (`pdftotext`)
 ```bash
-git clone https://github.com/scharc/consorsbank-pdf-extractor.git
-cd consorsbank-pdf-extractor
-poetry install
+sudo apt install poppler-utils      # Debian/Ubuntu
+brew install poppler                # macOS
 ```
 
-### Option 2: Using pip
+### Then clone (Poetry optional — the code is pure stdlib)
 ```bash
 git clone https://github.com/scharc/consorsbank-pdf-extractor.git
 cd consorsbank-pdf-extractor
-pip install -r requirements.txt
+poetry install        # optional; or just run with system python3
 ```
 
 ## Usage
@@ -44,7 +53,7 @@ python extract.py --input statements/ --output 2024_taxes.csv --verbose
 
 ### CLI Options
 
-- `--input`, `-i`: Directory containing PDF files (default: `pdfs/`)
+- `--input`, `-i`: Directory containing PDF files, **searched recursively** (default: `pdfs/`)
 - `--output`, `-o`: Output CSV file (default: `output.csv`)
 - `--verbose`, `-v`: Enable detailed logging
 - `--help`, `-h`: Show help message
@@ -55,13 +64,18 @@ The generated CSV contains these columns:
 
 | Column | Description | Example |
 |--------|-------------|---------|
-| `transaction_date` | When the transaction occurred | `01.02.2024` |
-| `transaction_id` | Bank reference number | `12345` |
-| `value_date` | When money was actually moved | `03.02.2024` |
+| `booking_date` | Buchungsdatum (Datum) | `01.02.2024` |
+| `value_date` | Valutadatum (Wert) | `03.02.2024` |
+| `type` | Buchungsart | `EURO-UEBERW.` |
+| `pnnr` | Posting code (PNNr) | `8420` |
 | `name` | Recipient or sender name | `REWE Supermarket` |
-| `iban` | IBAN or card reference | `DE89370400440532013000` |
-| `amount` | Transaction amount (negative = debit) | `-45.67` |
-| `comment` | Additional transaction details | `Payment for groceries` |
+| `bic` | BIC of counterparty | `GENODEF1S15` |
+| `iban` | IBAN of counterparty (empty for VISA card debits) | `DE89370400440532013000` |
+| `amount` | Signed decimal amount (negative = debit) | `-45.67` |
+| `purpose` | Verwendungszweck / details | `Payment for groceries` |
+| `source_file` | Originating PDF filename | `KONTOAUSZUG_..._dat20240201_id....pdf` |
+
+Rows are sorted chronologically by booking date across all statements.
 
 ## Supported Transaction Types
 
@@ -96,14 +110,13 @@ The generated CSV contains these columns:
 
 ```
 consorsbank-pdf-extractor/
-├── consorsextract/           # Main package
-│   ├── __init__.py          # PDF reading functions
-│   ├── parser.py            # Text cleaning and data extraction
+├── consorsextract/          # Main package
+│   ├── __init__.py          # PDF → text via `pdftotext -layout`
+│   ├── parser.py            # Transaction parsing + balance reconciliation
 │   └── csv_writer.py        # CSV output formatting
 ├── extract.py               # CLI interface
-├── pdfs/                    # Place your PDF files here
-├── requirements.txt         # Dependencies for pip users
-└── pyproject.toml          # Poetry configuration
+├── pdfs/                    # Place your PDF files here (scanned recursively)
+└── pyproject.toml           # Poetry configuration (no runtime deps)
 ```
 
 ## Contributing
