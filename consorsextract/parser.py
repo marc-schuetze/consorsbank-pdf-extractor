@@ -1,7 +1,9 @@
 """
 Text cleaning and transaction data extraction for Consorsbank PDFs
+Supports both 2016 format (multi-line) and 2021+ format (flattened)
 """
 import logging
+import re
 
 # Consorsbank-specific text patterns
 BANK_HEADER_PATTERN = "ConsorsbankisteineeingetrageneMarkederBNPParibasS.A."
@@ -83,80 +85,227 @@ def separate_blocks(cleaned_lines):
     return blocks
 
 
+def detect_format(block):
+    """
+    Detect transaction format version (2016 vs 2021+).
+    
+    2016 format: Multi-line with transaction type on first line, BIC/IBAN on separate line
+    2021+ format: Flattened, date concatenated with ID and amount
+    
+    Args:
+        block (str): Transaction text block
+        
+    Returns:
+        str: "2016" or "2021" indicating format version
+    """
+    lines = [line.strip() for line in block.split("\n") if line.strip()]
+    
+    if not lines:
+        return None
+    
+    first_line = lines[0]
+    
+    # 2021+ format: starts with date like "30.09.21 . 2021" OR has pattern with dates and amount
+    if re.match(r'^\d{2}\.\d{2}\.\d{2}\s*\.\s*\d{4}', first_line):
+        return "2021"
+    
+    # 2021+ format variant: TYPE followed by dates and amounts (e.g., GEBUEHREN, DAUERAUFTRAGNR, GEHALT/RENTE)
+    if re.search(r'\d{2}\.\d{2}\.\d{4,5}\d{2}\.\d{2}\.\s*[\d.,+-]+', first_line):
+        return "2021"
+    
+    # 2016 format: starts with transaction type (LASTSCHRIFT, EURO-UEBERW., etc)
+    if any(t in first_line for t in ["LASTSCHRIFT", "EURO-UEBERW.", "UEBERWEISUNG"]):
+        return "2016"
+    
+    return None
+
+
 def extract_data(block, current_year):
     """
     Extract transaction data from a text block.
     
-    Parses transaction date, value date, transaction ID, amount, name, 
-    IBAN, and comment from a formatted text block.
+    Auto-detects format and routes to appropriate parser.
     
     Args:
         block (str): Transaction text block
         current_year (str): Year to append to dates (e.g., "2024")
         
     Returns:
-        dict: Transaction data with keys: transaction_date, transaction_id, 
+        dict: Transaction data with keys: transaction_date, transaction_id,
               value_date, name, iban, amount, comment
         None: If block cannot be parsed
     """
-    # Remove empty lines
+    fmt = detect_format(block)
+    
+    if fmt == "2016":
+        return extract_data_2016(block, current_year)
+    elif fmt == "2021":
+        return extract_data_2021(block, current_year)
+    else:
+        logging.warning(f"Unknown format in block: {block[:50]}")
+        return None
+
+
+def extract_data_2016(block, current_year):
+    """
+    Extract transaction data from 2016 format (multi-line).
+    
+    Extracts: date, amount, name, comment. IBAN left empty.
+    
+    Format:
+        TRANSACTION_TYPE DATE PNNUM DATE AMOUNT
+            RECIPIENT_NAME
+           <BIC_CODE>    IBAN
+           REFERENCE_LINES...
+    
+    Args:
+        block (str): Transaction text block
+        current_year (str): Year to append to dates
+        
+    Returns:
+        dict: Transaction data or None if parsing fails
+    """
+    lines = [line.strip() for line in block.split("\n") if line.strip()]
+    
+    if len(lines) < 2:
+        logging.error("2016 format: Block too short")
+        return None
+    
+    try:
+        # Parse first line: extract date and amount
+        # Format varies, but typically: TYPE DATE PNNUM DATE AMOUNT
+        first_line = lines[0]
+        
+        # Extract dates and amount using regex to be robust
+        # Look for patterns like "15.11." and amounts like "98,61-" or "1.250,00-"
+        date_pattern = r'(\d{2}\.\d{2}\.)'
+        amount_pattern = r'(\d+[.,]\d+[+-]?)'
+        
+        dates = re.findall(date_pattern, first_line)
+        amounts = re.findall(amount_pattern, first_line)
+        
+        if len(dates) < 2 or not amounts:
+            logging.error(f"2016 format: Could not parse dates/amount from: {first_line}")
+            return None
+        
+        transaction_date_str = dates[0]  # First date
+        value_date_str = dates[1]  # Second date
+        amount_str = amounts[-1]  # Last amount found
+        
+        # Add year to dates
+        transaction_date = transaction_date_str + current_year
+        value_date = value_date_str + current_year
+        
+        # Parse amount (German format: comma as decimal, +/- for sign)
+        amount = amount_str.replace(".", "").replace(",", ".")
+        if amount.endswith("-"):
+            amount = "-" + amount[:-1]
+        elif amount.endswith("+"):
+            amount = amount[:-1]
+        
+        # Extract recipient name (line 2)
+        name = lines[1]
+        
+        # Extract comment from lines 3 onwards
+        comment_lines = lines[2:]
+        comment = " ".join(comment_lines)
+        
+        # Simple transaction ID from first line parts
+        transaction_id = ""
+        
+        return {
+            "transaction_date": transaction_date,
+            "transaction_id": transaction_id,
+            "value_date": value_date,
+            "name": name,
+            "iban": "",  # Not extracted for 2016
+            "amount": amount,
+            "comment": comment,
+        }
+        
+    except Exception as e:
+        logging.error(f"2016 format: Error parsing block: {e}")
+        return None
+
+
+def extract_data_2021(block, current_year):
+    """
+    Extract transaction data from 2021+ format (flattened).
+    
+    Format: DATE . YEAR RECIPIENT NAME IBAN AMOUNT RECIPIENT REFERENCE...
+    
+    Args:
+        block (str): Transaction text block
+        current_year (str): Year to append to dates
+        
+    Returns:
+        dict: Transaction data or None if parsing fails
+    """
     lines = [line.strip() for line in block.split("\n") if line.strip() != ""]
     
-    # Extract date, transaction ID, another date, name, IBAN, and amount
-    first_line = lines[0].split()
-    if len(first_line) < 3:
-        logging.error("Invalid first line format")
+    if len(lines) < 1:
+        logging.error("2021 format: Empty block")
         return None
-
-    # Parse the concatenated date/ID string from the PDF
-    date_value = first_line[1]
-    transaction_date = date_value[:5] + "." + current_year
-    transaction_id = date_value[5:10]
-    value_date = date_value[10:] + current_year
-
-    # Parse amount with German formatting
-    amount = first_line[2]
-    amount = amount.replace(".", "").strip()
-    if amount.endswith("-"):
-        amount = "-" + amount[:-1]
-    elif amount.endswith("+"):
-        amount = amount[:-1]
-
-    # Extract recipient/sender name
-    name = lines[1]
-
-    # Extract IBAN or card reference
-    iban_line = None
-    for line in lines:
-        if "<" in line:
-            iban_line = line
-            break
-        elif "VISA" in line:
-            iban_line = line
-            break
     
-    if iban_line is None:
-        logging.error("No IBAN found")
+    try:
+        # Parse the concatenated date/ID string from the PDF
+        first_line = lines[0].split()
+        if len(first_line) < 3:
+            logging.error("2021 format: Invalid first line format")
+            return None
+
+        date_value = first_line[1]
+        transaction_date = date_value[:5] + "." + current_year
+        transaction_id = date_value[5:10]
+        value_date = date_value[10:] + current_year
+
+        # Parse amount with German formatting
+        amount = first_line[2]
+        amount = amount.replace(".", "").strip()
+        if amount.endswith("-"):
+            amount = "-" + amount[:-1]
+        elif amount.endswith("+"):
+            amount = amount[:-1]
+
+        # Extract recipient/sender name
+        name = lines[1]
+
+        # Extract IBAN or card reference
+        iban_line = None
+        for line in lines:
+            if "<" in line:
+                iban_line = line
+                break
+            elif "VISA" in line:
+                iban_line = line
+                break
+        
+        if iban_line is None:
+            logging.error("2021 format: No IBAN found")
+            return None
+
+        iban = extract_iban(iban_line)
+        if not iban:
+            logging.error("2021 format: Invalid IBAN format")
+            return None
+
+        # Extract comment from remaining lines
+        comment_lines = lines[3:]
+        comment = " ".join(comment_lines)
+
+        return {
+            "transaction_date": transaction_date,
+            "transaction_id": transaction_id,
+            "value_date": value_date,
+            "name": name,
+            "iban": iban,
+            "amount": amount,
+            "comment": comment,
+        }
+        
+    except Exception as e:
+        logging.error(f"2021 format: Error parsing block: {e}")
         return None
-
-    iban = extract_iban(iban_line)
-    if not iban:
-        logging.error("Invalid IBAN format")
-        return None
-
-    # Extract comment from remaining lines
-    comment_lines = lines[3:]
-    comment = " ".join(comment_lines)
-
-    return {
-        "transaction_date": transaction_date,
-        "transaction_id": transaction_id,
-        "value_date": value_date,
-        "name": name,
-        "iban": iban,
-        "amount": amount,
-        "comment": comment,
-    }
 
 
 def extract_iban(line):

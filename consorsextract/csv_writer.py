@@ -9,6 +9,7 @@ def write_to_csv(data, csv_file):
     Write transaction data to CSV file.
     
     Creates the file with headers if it doesn't exist, otherwise appends data.
+    Converts amounts to German format (comma as decimal separator).
     
     Args:
         data (dict): Transaction data with keys: transaction_date, transaction_id,
@@ -17,6 +18,13 @@ def write_to_csv(data, csv_file):
     """
     if data is None:
         return
+
+    # Make a copy to avoid modifying original
+    data_copy = data.copy()
+    
+    # Convert amount to German format (dot to comma for decimal)
+    if data_copy.get("amount"):
+        data_copy["amount"] = data_copy["amount"].replace(".", ",")
 
     with open(csv_file, "a", newline="", encoding="utf-8") as file:
         fieldnames = [
@@ -34,4 +42,4 @@ def write_to_csv(data, csv_file):
         if file.tell() == 0:
             writer.writeheader()
 
-        writer.writerow(data)
+        writer.writerow(data_copy)
