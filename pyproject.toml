@@ -5,7 +5,7 @@ description = "Extract transaction data from Consorsbank PDF statements and conv
 authors = ["Marc Schütze <scharc@gmail.com>"]
 readme = "README.md"
 license = "MIT"
-repository = "https://github.com/scharc/consorsbank-pdf-extractor"
+repository = "https://github.com/marc-schuetze/consorsbank-pdf-extractor"
 keywords = ["pdf", "banking", "consorsbank", "csv", "finance", "tax"]
 
 [tool.poetry.dependencies]

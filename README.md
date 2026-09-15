@@ -34,7 +34,7 @@ brew install poppler                # macOS
 
 ### Then clone (Poetry optional — the code is pure stdlib)
 ```bash
-git clone https://github.com/scharc/consorsbank-pdf-extractor.git
+git clone https://github.com/marc-schuetze/consorsbank-pdf-extractor.git
 cd consorsbank-pdf-extractor
 poetry install        # optional; or just run with system python3
 ```
